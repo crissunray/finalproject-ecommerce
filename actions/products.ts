@@ -85,12 +85,17 @@ export type CategoriesResult = SuccessResult<string[]> | ErrorResult;
  */
 export async function getProducts(): Promise<ProductsResult> {
   try {
-    // fetch() = fungsi bawaan JavaScript untuk ambil data dari internet
+    // AbortController = mekanisme untuk membatalkan fetch jika terlalu lama
+    // Penting di Vercel karena serverless function punya batas waktu
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000); // batalkan setelah 8 detik
+
     const response = await fetch("https://fakestoreapi.com/products", {
-      next: {
-        revalidate: 3600, // cache 1 jam — hemat bandwidth & lebih cepat
-      },
+      signal: controller.signal, // hubungkan ke AbortController
+      cache: "no-store",         // selalu ambil data terbaru (hindari cache stale di Vercel)
     });
+
+    clearTimeout(timeout); // batalkan timer jika fetch selesai sebelum 8 detik
 
     // Cek apakah server API merespons dengan sukses (status 200-299)
     if (!response.ok) {
@@ -102,8 +107,8 @@ export async function getProducts(): Promise<ProductsResult> {
 
     return { success: true, data: products };
   } catch (error) {
-    // Kalau ada error apapun (network mati, API down, dll) tangkap di sini
-    console.error("Error fetchin products:", error);
+    // Kalau ada error apapun (network mati, API down, timeout) tangkap di sini
+    console.error("Error fetching products:", error);
     return { success: false, error: "Gagal memuat produk" };
   }
 }
@@ -123,10 +128,16 @@ export async function getProducts(): Promise<ProductsResult> {
  */
 export async function getProductById(id: string) {
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+
     // Template literal (backtick) untuk menyisipkan variabel ke dalam string
     const response = await fetch(`https://fakestoreapi.com/products/${id}`, {
-      next: { revalidate: 3600 },
+      signal: controller.signal,
+      cache: "no-store",
     });
+
+    clearTimeout(timeout);
 
     if (!response.ok) {
       // Produk tidak ditemukan (404) atau error lain
@@ -154,10 +165,15 @@ export async function getProductById(id: string) {
  */
 export async function getProductsByCategory(category: string) {
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+
     const response = await fetch(
       `https://fakestoreapi.com/products/category/${category}`,
-      { next: { revalidate: 3600 } }
+      { signal: controller.signal, cache: "no-store" }
     );
+
+    clearTimeout(timeout);
 
     if (!response.ok) {
       throw new Error(`Gagal fetch kategori: ${response.status}`);
@@ -185,10 +201,15 @@ export async function getProductsByCategory(category: string) {
  */
 export async function getCategories(): Promise<CategoriesResult> {
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000);
+
     const response = await fetch(
       "https://fakestoreapi.com/products/categories",
-      { next: { revalidate: 86400 } } // cache 24 jam
+      { signal: controller.signal, cache: "no-store" }
     );
+
+    clearTimeout(timeout);
 
     if (!response.ok) {
       throw new Error(`Gagal fetch kategori: ${response.status}`);
