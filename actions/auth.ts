@@ -1,3 +1,5 @@
+"use server";
+
 /**
  * ============================================================
  * FILE: actions/auth.ts
@@ -9,34 +11,19 @@
  * - Menyimpan data user yang login ke dalam COOKIE
  * - Mengambil data user dari cookie (cek apakah sudah login)
  * - Logout (hapus cookie)
- *
- * APA ITU COOKIE?
- * ---------------
- * Cookie adalah data kecil yang disimpan di browser user.
- * Dipakai untuk "mengingat" bahwa user sudah login,
- * sehingga tidak perlu login ulang setiap buka halaman baru.
- *
- * Cookie kita pakai:
- * - "user_session" → menyimpan data user yang sedang login
  */
 
-"use server";
-
-// cookies() adalah fungsi dari Next.js untuk membaca/menulis cookie
 import { cookies } from "next/headers";
 
 // ============================================================
 // TIPE DATA
 // ============================================================
 
-/**
- * User — Bentuk data satu user dari FakeStore API
- */
 export type User = {
-  id: number;        // ID unik user
-  username: string;  // nama login
-  email: string;     // alamat email
-  password?: string; // password (tanda ? = opsional, kadang tidak ada)
+  id: number;
+  username: string;
+  email: string;
+  password?: string;
   name?: {
     firstname: string;
     lastname: string;
@@ -51,45 +38,90 @@ export type User = {
 };
 
 // ============================================================
-// FUNGSI 1: loginUser — Proses Login
+// HELPER: fetch dengan retry otomatis (sama seperti products.ts)
 // ============================================================
 /**
- * Memvalidasi username & password, lalu menyimpan sesi login ke cookie.
- *
- * ALUR KERJA (3 langkah):
- * 1. POST ke /auth/login → FakeStore API cek kredensial, balik JWT token
- * 2. Decode token JWT → dapat user ID
- * 3. GET /users/{id} → ambil data lengkap user, simpan ke cookie
- *
- * APA ITU JWT?
- * ------------
- * JWT (JSON Web Token) = string terenkripsi berisi informasi user.
- * Bentuknya: xxxxx.yyyyy.zzzzz (3 bagian dipisah titik)
- * Bagian tengah (yyyyy) bisa di-decode untuk dapat data seperti user ID.
- *
- * @param username - nama login user
- * @param password - password user
- * @returns { success: true, data: User } atau { success: false, error: string }
+ * fetchWithRetry — Coba fetch hingga 3 kali jika gagal
+ * Menangani FakeStore API yang lambat "bangun" di Render.com free tier
  */
+async function fetchWithRetry(
+  url: string,
+  options: RequestInit = {},
+  retries = 3
+): Promise<Response> {
+  let lastError: unknown;
+
+  for (let i = 0; i < retries; i++) {
+    try {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 15000); // 15 detik
+
+      const response = await fetch(url, {
+        ...options,              // spread options yang dikirim (method, headers, body, dll)
+        signal: controller.signal,
+        headers: {
+          "User-Agent": "Mozilla/5.0 (compatible; FakeStore-NextJS/1.0)",
+          "Accept": "application/json",
+          ...(options.headers ?? {}), // gabungkan dengan headers dari options
+        },
+      });
+
+      clearTimeout(timeout);
+
+      if (response.ok) return response; // berhasil → langsung return
+
+      // Jika 401 (unauthorized) = password salah, langsung berhenti — tidak perlu retry
+      if (response.status === 401 || response.status === 400) {
+        throw Object.assign(new Error("INVALID_CREDENTIALS"), { status: response.status });
+      }
+
+      console.warn(`[auth] Percobaan ${i + 1}/${retries} gagal: HTTP ${response.status}`);
+      lastError = new Error(`HTTP ${response.status}`);
+    } catch (err: any) {
+      // Kalau error karena kredensial salah → lempar langsung, jangan retry
+      if (err?.message === "INVALID_CREDENTIALS") throw err;
+
+      console.warn(`[auth] Percobaan ${i + 1}/${retries} error:`, err);
+      lastError = err;
+    }
+
+    // Jeda sebelum retry
+    if (i < retries - 1) {
+      await new Promise((r) => setTimeout(r, 1000 * (i + 1)));
+    }
+  }
+
+  throw lastError ?? new Error("Fetch gagal setelah semua percobaan");
+}
+
+// ============================================================
+// FUNGSI 1: loginUser — Proses Login
+// ============================================================
 export async function loginUser(username: string, password: string) {
   try {
     // ─── LANGKAH 1: Validasi kredensial via FakeStore Auth API ───
-    const authResponse = await fetch("https://fakestoreapi.com/auth/login", {
-      method: "POST",  // POST = kirim data ke server
-      headers: {
-        "Content-Type": "application/json", // beritahu server bahwa kita kirim JSON
-      },
-      body: JSON.stringify({ username, password }), // ubah objek JS ke string JSON
-      cache: "no-store", // jangan cache — request login harus selalu fresh
-    });
+    let authResponse: Response;
 
-    // Kalau API mengembalikan error (400/401) berarti kredensial salah
-    if (!authResponse.ok) {
-      return { success: false, error: "Username atau password salah" };
+    try {
+      authResponse = await fetchWithRetry(
+        "https://fakestoreapi.com/auth/login",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ username, password }),
+          cache: "no-store",
+        }
+      );
+    } catch (err: any) {
+      // Jika error karena kredensial salah (401/400)
+      if (err?.message === "INVALID_CREDENTIALS") {
+        return { success: false, error: "Username atau password salah" };
+      }
+      // Jika error karena timeout/network
+      return { success: false, error: "Server sedang sibuk, coba lagi dalam beberapa detik" };
     }
 
     // Ambil token dari response
-    // Bentuk response: { "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." }
     const { token } = await authResponse.json();
 
     if (!token) {
@@ -97,41 +129,35 @@ export async function loginUser(username: string, password: string) {
     }
 
     // ─── LANGKAH 2: Decode JWT untuk ambil user ID ───
-    // JWT terdiri dari 3 bagian: header.payload.signature
-    // Kita ambil bagian tengah (index 1) yaitu payload
     const payloadBase64 = token.split(".")[1];
-
-    // Decode dari Base64 ke JSON string, lalu parse ke objek
     const payload = JSON.parse(
       Buffer.from(payloadBase64, "base64").toString("utf-8")
     );
-    // Contoh isi payload: { sub: 1, user: "johnd", iat: 1234567890 }
-    const userId: number = payload.sub; // "sub" = subject = user ID
+    const userId: number = payload.sub;
 
     // ─── LANGKAH 3: Ambil data lengkap user dari API ───
-    const userResponse = await fetch(
-      `https://fakestoreapi.com/users/${userId}`,
-      { cache: "no-store" }
-    );
-
-    if (!userResponse.ok) {
-      return { success: false, error: "Gagal mengambil data user" };
+    let userResponse: Response;
+    try {
+      userResponse = await fetchWithRetry(
+        `https://fakestoreapi.com/users/${userId}`,
+        { cache: "no-store" }
+      );
+    } catch {
+      return { success: false, error: "Gagal mengambil data user, coba lagi" };
     }
 
     const userDetail: User = await userResponse.json();
 
-    // Hapus password dari data sebelum disimpan ke cookie (keamanan!)
-    // Destructuring: pisahkan password dari sisa data
+    // Hapus password dari data sebelum disimpan ke cookie
     const { password: _pw, ...safeUser } = userDetail;
-    // safeUser = semua field KECUALI password
 
     // ─── Simpan ke cookie ───
     const cookieStore = await cookies();
     cookieStore.set("user_session", JSON.stringify(safeUser), {
-      httpOnly: true,  // cookie tidak bisa diakses lewat JavaScript browser (aman dari XSS)
-      secure: process.env.NODE_ENV === "production", // HTTPS only di production
-      sameSite: "strict", // cookie hanya dikirim ke domain yang sama (aman dari CSRF)
-      maxAge: 60 * 60 * 24 * 7, // durasi: 7 hari (dalam detik)
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "strict",
+      maxAge: 60 * 60 * 24 * 7, // 7 hari
     });
 
     return { success: true, data: safeUser };
@@ -144,34 +170,18 @@ export async function loginUser(username: string, password: string) {
 // ============================================================
 // FUNGSI 2: getCurrentUser — Cek User yang Sedang Login
 // ============================================================
-/**
- * Membaca cookie "user_session" untuk mendapatkan data user aktif.
- * Dipanggil setiap kali app dimuat untuk mengecek status login.
- *
- * KAPAN DIPANGGIL?
- * ----------------
- * Di AuthContext.tsx → useEffect saat pertama kali app dibuka.
- * Ini membuat navbar langsung menampilkan nama user tanpa login ulang.
- *
- * @returns { success: true, data: User } jika sudah login
- * @returns { success: false, data: null } jika belum login
- */
 export async function getCurrentUser() {
   try {
     const cookieStore = await cookies();
-    // Coba ambil cookie bernama "user_session"
     const session = cookieStore.get("user_session");
 
-    // Kalau cookie tidak ada → user belum login
     if (!session) {
       return { success: false, data: null };
     }
 
-    // Parse JSON string dari cookie kembali ke objek JavaScript
     const user: User = JSON.parse(session.value);
     return { success: true, data: user };
   } catch {
-    // Cookie rusak/tidak valid
     return { success: false, data: null };
   }
 }
@@ -179,15 +189,8 @@ export async function getCurrentUser() {
 // ============================================================
 // FUNGSI 3: logoutUser — Proses Logout
 // ============================================================
-/**
- * Menghapus cookie sesi login, efektif "melupakan" user.
- *
- * Setelah fungsi ini dipanggil:
- * - Cookie "user_session" terhapus
- * - Halaman yang butuh login akan redirect ke /login
- */
 export async function logoutUser() {
   const cookieStore = await cookies();
-  cookieStore.delete("user_session"); // hapus cookie
+  cookieStore.delete("user_session");
   return { success: true };
 }
