@@ -26,8 +26,9 @@
  * Hanya AddToCartButton yang "use client" karena butuh interaktivitas.
  */
 
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 // notFound() = tampilkan halaman 404 jika produk tidak ditemukan
+// redirect()  = arahkan user ke halaman lain (server-side redirect)
 
 import { getProductById } from "@/actions/products";
 // Server action untuk fetch satu produk berdasarkan ID dari FakeStore API
@@ -61,39 +62,18 @@ export default async function ProductDetailPage({ params }: PageProps) {
   const result = await getProductById(id);
 
   // ── KASUS 1: Fetch GAGAL (server lambat/timeout/koneksi error) ──
-  // JANGAN langsung notFound() — produk mungkin sebenarnya ADA,
-  // hanya saja FakeStore API (Render.com) sedang "tidur"/lambat merespons.
-  // Tampilkan halaman error dengan tombol "Coba Lagi" agar user
-  // bisa refresh tanpa dianggap produk tidak ada secara permanen.
+  // Daripada menampilkan halaman error/404, arahkan user ke halaman
+  // /login terlebih dahulu. Setelah berhasil login, user bisa kembali
+  // membuka halaman produk ini (FakeStore API biasanya sudah "bangun"
+  // saat itu karena request login juga memanggil API yang sama).
+  //
+  // Query string ?redirect=/product/{id} dikirim agar (jika diperlukan
+  // di kemudian hari) halaman login bisa mengarahkan user kembali
+  // ke halaman produk ini setelah login berhasil.
   if (!result.success) {
-    return (
-      <div className="min-h-screen bg-[#f8f8f6] flex items-center justify-center px-6">
-        <div className="text-center max-w-md">
-          <h1 className="text-xl font-semibold text-gray-900 mb-2">
-            Gagal memuat produk
-          </h1>
-          <p className="text-sm text-gray-500 mb-6">
-            Server sedang sibuk atau lambat merespons. Silakan coba lagi
-            dalam beberapa detik.
-          </p>
-          <div className="flex items-center justify-center gap-3">
-            {/* Link ke URL yang sama → memicu reload halaman & fetch ulang */}
-            <Link
-              href={`/product/${id}`}
-              className="px-5 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-full hover:bg-gray-800 transition-colors"
-            >
-              Coba Lagi
-            </Link>
-            <Link
-              href="/"
-              className="px-5 py-2.5 border border-gray-200 text-gray-700 text-sm font-medium rounded-full hover:bg-gray-50 transition-colors"
-            >
-              Kembali ke Beranda
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
+    redirect(`/login?redirect=/product/${id}`);
+    // redirect() menghentikan render halaman ini dan langsung
+    // mengirim response redirect ke browser (HTTP 307).
   }
 
   // ── KASUS 2: Fetch BERHASIL tapi produk tidak ditemukan ──
