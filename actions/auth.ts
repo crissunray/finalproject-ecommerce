@@ -17,19 +17,8 @@ import { cookies } from "next/headers";
 
 import usersData from "@/data/users.json";
 // usersData = salinan LOKAL data /users dari FakeStore API.
-//
-// KENAPA PAKAI DATA LOKAL UNTUK LOGIN?
-// -------------------------------------
-// Saat di-deploy ke Vercel, request ke fakestoreapi.com/auth/login
-// SELALU gagal dengan HTTP 403 — Cloudflare (proteksi di depan
-// fakestoreapi.com) memblokir IP server Vercel sebagai "bot".
-// Ini terjadi di level jaringan, SEBELUM kode kita berjalan,
-// jadi tidak bisa diperbaiki dengan retry/timeout apapun.
-//
-// SOLUSI: karena akun demo (johnd, mor_2314, dst) bersifat TETAP
-// dan datanya PUBLIK (https://fakestoreapi.com/users), kita simpan
-// salinannya di file data/users.json dan validasi login LANGSUNG
-// dari situ — tanpa perlu memanggil fakestoreapi.com sama sekali.
+// Dipakai sebagai FALLBACK jika API live (fakestoreapi.com) gagal
+// diakses — misalnya diblokir Cloudflare (HTTP 403) di server Vercel.
 
 // ============================================================
 // TIPE DATA
@@ -54,34 +43,107 @@ export type User = {
 };
 
 // ============================================================
+// HELPER: fetchLive — Coba fetch ke FakeStore API (timeout pendek)
+// ============================================================
+/**
+ * fetchLive — Fetch dengan timeout pendek (8 detik), tanpa retry panjang
+ *
+ * Cloudflare bisa memblokir dengan HTTP 403 secara INSTAN (bukan
+ * timeout), jadi tidak perlu retry berkali-kali — cukup 1x percobaan
+ * dengan timeout pendek, lalu jika gagal, caller akan pakai data lokal.
+ *
+ * @returns Response jika berhasil (HTTP ok), atau null jika gagal
+ */
+async function fetchLive(url: string, options: RequestInit = {}): Promise<Response | null> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 8000); // 8 detik
+
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+      cache: "no-store",
+      headers: {
+        "User-Agent": "Mozilla/5.0 (compatible; FakeStore-NextJS/1.0)",
+        "Accept": "application/json",
+        ...(options.headers ?? {}),
+      },
+    });
+
+    clearTimeout(timeout);
+
+    if (response.ok) return response;
+
+    console.warn(`[fetchLive] gagal: HTTP ${response.status} - ${url}`);
+    return null;
+  } catch (err) {
+    console.warn(`[fetchLive] error:`, err);
+    return null;
+  }
+}
+
+// ============================================================
 // FUNGSI 1: loginUser — Proses Login
 // ============================================================
 /**
- * loginUser — Validasi username & password ke data LOKAL (data/users.json)
+ * loginUser — Login via FakeStore API (live), fallback ke data lokal
  *
- * Tidak ada panggilan ke fakestoreapi.com sama sekali — menghindari
- * blokir Cloudflare (HTTP 403) yang terjadi saat Vercel mengakses
- * fakestoreapi.com.
+ * ALUR:
+ * 1. Coba POST ke fakestoreapi.com/auth/login (live)
+ *    → jika berhasil, ambil data user lengkap via GET /users/{id}
+ * 2. Jika API live gagal (mis. diblokir Cloudflare HTTP 403, atau
+ *    timeout), VALIDASI ULANG ke data lokal (data/users.json) —
+ *    sehingga login tetap berhasil untuk akun-akun demo.
  *
  * @param username - username yang diketik user
  * @param password - password yang diketik user
  */
 export async function loginUser(username: string, password: string) {
   try {
-    // ─── Cari user di data lokal yang username & password-nya cocok ───
-    // .find() = cari elemen pertama yang memenuhi kondisi, atau undefined
-    const userDetail = (usersData as User[]).find(
-      (u) => u.username === username && u.password === password
-    );
+    // ─── LANGKAH 1: Coba login via API live ───
+    const authResponse = await fetchLive("https://fakestoreapi.com/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
 
-    // Jika tidak ditemukan → username atau password salah
-    if (!userDetail) {
-      return { success: false, error: "Username atau password salah" };
+    let safeUser: Omit<User, "password"> | null = null;
+
+    if (authResponse) {
+      const { token } = await authResponse.json();
+
+      if (token) {
+        // Decode JWT untuk ambil user ID
+        const payloadBase64 = token.split(".")[1];
+        const payload = JSON.parse(Buffer.from(payloadBase64, "base64").toString("utf-8"));
+        const userId: number = payload.sub;
+
+        // Ambil data lengkap user dari API live
+        const userResponse = await fetchLive(`https://fakestoreapi.com/users/${userId}`);
+        if (userResponse) {
+          const userDetail: User = await userResponse.json();
+          const { password: _pw, ...rest } = userDetail;
+          safeUser = rest;
+        }
+      }
     }
 
-    // Hapus password dari data sebelum disimpan ke cookie
-    // (destructuring: ambil semua field KECUALI password)
-    const { password: _pw, ...safeUser } = userDetail;
+    // ─── LANGKAH 2: FALLBACK ke data lokal jika API live gagal ───
+    if (!safeUser) {
+      console.warn("[loginUser] API live gagal/diblokir, validasi via data lokal");
+
+      // .find() = cari elemen pertama yang memenuhi kondisi, atau undefined
+      const userLocal = (usersData as User[]).find(
+        (u) => u.username === username && u.password === password
+      );
+
+      if (!userLocal) {
+        return { success: false, error: "Username atau password salah" };
+      }
+
+      const { password: _pw, ...rest } = userLocal;
+      safeUser = rest;
+    }
 
     // ─── Simpan ke cookie ───
     const cookieStore = await cookies();
