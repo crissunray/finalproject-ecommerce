@@ -47,19 +47,25 @@ export type CategoriesResult = SuccessResult<string[]> | ErrorResult;
  *
  * FakeStore API berjalan di Render.com free tier yang bisa "tidur".
  * Request pertama butuh 10-20 detik untuk bangun.
- * Fungsi ini otomatis coba lagi hingga 3 kali.
+ * Fungsi ini otomatis coba lagi hingga 4 kali.
+ *
+ * PERHITUNGAN WAKTU MAKSIMAL (harus < vercel.json maxDuration = 60s):
+ *   4 percobaan x 12 detik timeout = 48 detik
+ *   + jeda antar percobaan (1 + 2 + 3 detik)  = 6 detik
+ *   ─────────────────────────────────────────────────
+ *   Total maksimal                            = 54 detik (aman, < 60s)
  *
  * @param url     - URL yang akan di-fetch
- * @param retries - jumlah percobaan maksimal (default: 3)
+ * @param retries - jumlah percobaan maksimal (default: 4)
  */
-async function fetchWithRetry(url: string, retries = 3): Promise<Response> {
+async function fetchWithRetry(url: string, retries = 4): Promise<Response> {
   let lastError: unknown;
 
   for (let i = 0; i < retries; i++) {
     try {
       // Buat controller baru setiap percobaan
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 15000); // 15 detik
+      const timeout = setTimeout(() => controller.abort(), 12000); // 12 detik per percobaan
 
       const response = await fetch(url, {
         signal: controller.signal,

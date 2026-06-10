@@ -41,20 +41,26 @@ export type User = {
 // HELPER: fetch dengan retry otomatis (sama seperti products.ts)
 // ============================================================
 /**
- * fetchWithRetry — Coba fetch hingga 3 kali jika gagal
+ * fetchWithRetry — Coba fetch hingga 4 kali jika gagal
  * Menangani FakeStore API yang lambat "bangun" di Render.com free tier
+ *
+ * PERHITUNGAN WAKTU MAKSIMAL (harus < vercel.json maxDuration = 60s):
+ *   4 percobaan x 12 detik timeout = 48 detik
+ *   + jeda antar percobaan (1 + 2 + 3 detik)  = 6 detik
+ *   ─────────────────────────────────────────────────
+ *   Total maksimal                            = 54 detik (aman, < 60s)
  */
 async function fetchWithRetry(
   url: string,
   options: RequestInit = {},
-  retries = 3
+  retries = 4
 ): Promise<Response> {
   let lastError: unknown;
 
   for (let i = 0; i < retries; i++) {
     try {
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 15000); // 15 detik
+      const timeout = setTimeout(() => controller.abort(), 12000); // 12 detik per percobaan
 
       const response = await fetch(url, {
         ...options,              // spread options yang dikirim (method, headers, body, dll)
