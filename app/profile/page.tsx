@@ -33,11 +33,10 @@
  * - ordersLoading: true saat mengambil data pesanan
  * - isLoggingOut : true saat proses logout berlangsung
  *
- * CATATAN KODE (BUG YANG DIKETAHUI):
- * Di useEffect kedua, getUserOrders().then() dipanggil SEBELUM
- * pengecekan `if (tab === "orders" && user)`.
- * Artinya pesanan SELALU dimuat, tidak hanya saat tab "orders" aktif.
- * Secara fungsional masih bekerja karena data tetap dimuat.
+ * PERBAIKAN TERBARU:
+ * useEffect untuk memuat pesanan kini hanya berjalan saat tab
+ * "Pesanan" aktif DAN user sudah login. Sebelumnya request selalu
+ * dipanggil di setiap perubahan tab — sekarang sudah dioptimalkan.
  */
 "use client";
 
@@ -103,42 +102,33 @@ export default function ProfilePage() {
   /**
    * useEffect 2 — Muat data pesanan
    *
-   * CATATAN: Ada bug di sini — getUserOrders().then() dipanggil dulu
-   * SEBELUM cek `if (tab === "orders" && user)`.
-   * Akibatnya pesanan selalu dimuat di setiap perubahan tab.
-   * Tapi secara fungsional masih bekerja — data tetap tampil.
+   * PERBAIKAN (sebelumnya ada bug):
+   * Dulu getUserOrders() dipanggil DULUAN sebelum cek
+   * `if (tab === "orders" && user)`, sehingga request selalu
+   * jalan di setiap perubahan tab/user — boros & loading state
+   * tidak akurat.
+   *
+   * Sekarang: pengecekan kondisi dilakukan PALING AWAL.
+   * Request ke server HANYA jalan saat tab "Pesanan" aktif
+   * dan user sudah login.
    *
    * Dependency: [tab, user]
    */
   useEffect(() => {
-    // Ambil pesanan dari cookie — selalu dijalankan (lihat catatan di atas)
-    getUserOrders().then((r) => {
-      if (r.success) {
-        // .slice().reverse() = buat salinan array lalu balik urutannya
-        // (pesanan terbaru tampil di atas)
-        setOrders((r.data as Order[]).slice().reverse());
-      }
-      setOrdersLoading(false);
-    });
-
-    // Seharusnya kode ini yang menentukan kapan muat pesanan:
+    // ✅ Cek dulu: hanya jalan jika tab "orders" aktif & user sudah login
     if (tab === "orders" && user) {
-      setOrdersLoading(true);
-      // Sayangnya setOrdersLoading(true) dipanggil SETELAH getUserOrders()
-      // sudah mulai berjalan, jadi loading state tidak akurat
+      setOrdersLoading(true); // tampilkan spinner SEBELUM fetch dimulai
+
+      getUserOrders().then((r) => {
+        if (r.success) {
+          // .slice().reverse() = buat salinan array lalu balik urutannya
+          // (pesanan terbaru tampil di atas)
+          setOrders((r.data as Order[]).slice().reverse());
+        }
+        setOrdersLoading(false); // sembunyikan spinner setelah selesai
+      });
     }
   }, [tab, user]);
-
-  /**
-   * useEffect 3 — Debug: log data pesanan ke konsol browser
-   * (berguna untuk pengembangan — bisa dihapus di production)
-   *
-   * Dependency: [orders]
-   */
-  useEffect(() => {
-    console.log("order", orders);
-    // Buka DevTools browser → tab Console untuk melihat ini
-  }, [orders]);
 
   /**
    * handleLogout — Proses logout dan redirect ke /login
