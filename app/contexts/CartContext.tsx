@@ -48,13 +48,11 @@ import { useAuth } from "./AuthContext";
 // Import server actions dari cart.ts
 // "as" = memberi alias agar tidak konflik nama dengan fungsi lokal
 import {
-  getCart,
+  getCartData,
   addToCart as addToCartAction,
   removeFromCart as removeFromCartAction,
   updateCartQuantity as updateCartQuantityAction,
   clearCart as clearCartAction,
-  getCartTotal as getCartTotalAction,
-  getCartCount as getCartCountAction,
 } from "@/actions/cart";
 
 // ============================================================
@@ -120,32 +118,24 @@ export function CartProvider({ children }: { children: ReactNode }) {
   /**
    * refreshCart — Sinkronisasi data keranjang dari server ke client
    *
-   * Fungsi ini melakukan 3 request sekaligus secara berurutan:
-   * 1. Ambil daftar item keranjang
-   * 2. Ambil total harga
-   * 3. Ambil jumlah item
+   * Dulu fungsi ini memanggil 3 server action terpisah secara
+   * berurutan (getCart, getCartTotal, getCartCount) → 3 request
+   * bolak-balik ke server, yang membuat halaman /cart dan proses
+   * checkout terasa lama (apalagi jika function Vercel "cold start").
+   *
+   * Sekarang cukup 1 panggilan (getCartData) yang mengembalikan
+   * cart, total, dan count sekaligus → jauh lebih cepat.
    *
    * Dipanggil setiap kali ada perubahan (tambah, hapus, ubah qty).
    */
   const refreshCart = async () => {
     setIsLoading(true);
 
-    // Ambil data keranjang dari server (baca cookie)
-    const cartResult = await getCart();
-    if (cartResult.success) {
-      setCart(cartResult.data); // update state dengan data terbaru
-    }
-
-    // Ambil total harga
-    const totalResult = await getCartTotalAction();
-    if (totalResult.success) {
-      setTotal(totalResult.data);
-    }
-
-    // Ambil jumlah item (untuk badge di navbar)
-    const countResult = await getCartCountAction();
-    if (countResult.success) {
-      setCount(countResult.data);
+    const result = await getCartData();
+    if (result.success) {
+      setCart(result.data.cart);
+      setTotal(result.data.total);
+      setCount(result.data.count);
     }
 
     setIsLoading(false);

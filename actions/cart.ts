@@ -236,6 +236,33 @@ export async function getCartTotal() {
 }
 
 /**
+ * getCartData — Ambil cart, total, dan count SEKALIGUS dalam 1 panggilan
+ *
+ * KENAPA FUNGSI INI DIBUAT?
+ * --------------------------------------------------------------
+ * Sebelumnya, CartContext memanggil 3 server action terpisah secara
+ * berurutan (getCart, getCartTotal, getCartCount) setiap kali cart
+ * di-refresh. Setiap server action = 1 request bolak-balik ke server
+ * Vercel. Kalau function masih "cold start", 3 request berurutan bisa
+ * terasa SANGAT LAMA (halaman /cart & proses checkout terus loading).
+ *
+ * Dengan menggabungkan ketiganya jadi SATU server action, hanya perlu
+ * 1 request → jauh lebih cepat.
+ */
+export async function getCartData() {
+  const [cart, userId] = await Promise.all([
+    getCartFromCookie(),
+    getCurrentUserId(),
+  ]);
+
+  const userCart = userId ? cart.filter((item) => item.userId === userId) : [];
+  const total = userCart.reduce((sum, item) => sum + item.price * item.quantity, 0);
+  const count = userCart.reduce((sum, item) => sum + item.quantity, 0);
+
+  return { success: true, data: { cart: userCart, total, count } };
+}
+
+/**
  * getCartCount — Hitung total jumlah item (quantity) di keranjang
  *
  * Ini menghitung TOTAL QUANTITY, bukan jumlah jenis produk.
