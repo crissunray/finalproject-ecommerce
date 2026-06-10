@@ -60,8 +60,47 @@ export default async function ProductDetailPage({ params }: PageProps) {
   // Fetch data produk dari FakeStore API
   const result = await getProductById(id);
 
-  // Jika produk tidak ditemukan → tampilkan halaman 404
-  if (!result.success || !result.data) {
+  // ── KASUS 1: Fetch GAGAL (server lambat/timeout/koneksi error) ──
+  // JANGAN langsung notFound() — produk mungkin sebenarnya ADA,
+  // hanya saja FakeStore API (Render.com) sedang "tidur"/lambat merespons.
+  // Tampilkan halaman error dengan tombol "Coba Lagi" agar user
+  // bisa refresh tanpa dianggap produk tidak ada secara permanen.
+  if (!result.success) {
+    return (
+      <div className="min-h-screen bg-[#f8f8f6] flex items-center justify-center px-6">
+        <div className="text-center max-w-md">
+          <h1 className="text-xl font-semibold text-gray-900 mb-2">
+            Gagal memuat produk
+          </h1>
+          <p className="text-sm text-gray-500 mb-6">
+            Server sedang sibuk atau lambat merespons. Silakan coba lagi
+            dalam beberapa detik.
+          </p>
+          <div className="flex items-center justify-center gap-3">
+            {/* Link ke URL yang sama → memicu reload halaman & fetch ulang */}
+            <Link
+              href={`/product/${id}`}
+              className="px-5 py-2.5 bg-gray-900 text-white text-sm font-medium rounded-full hover:bg-gray-800 transition-colors"
+            >
+              Coba Lagi
+            </Link>
+            <Link
+              href="/"
+              className="px-5 py-2.5 border border-gray-200 text-gray-700 text-sm font-medium rounded-full hover:bg-gray-50 transition-colors"
+            >
+              Kembali ke Beranda
+            </Link>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── KASUS 2: Fetch BERHASIL tapi produk tidak ditemukan ──
+  // FakeStore API mengembalikan `{}` (objek kosong, tanpa field "id")
+  // untuk ID yang tidak terdaftar — bukan error HTTP.
+  // Di sinilah notFound() yang sebenarnya tepat digunakan.
+  if (!result.data || !result.data.id) {
     notFound();
   }
 
