@@ -124,7 +124,9 @@ export async function loginUser(username: string, password: string) {
         return { success: false, error: "Username atau password salah" };
       }
       // Jika error karena timeout/network
-      return { success: false, error: "Server sedang sibuk, coba lagi dalam beberapa detik" };
+      // (DEBUG SEMENTARA: tampilkan detail error asli agar bisa didiagnosis)
+      const detail = err?.cause?.message || err?.message || String(err);
+      return { success: false, error: `Server sedang sibuk, coba lagi dalam beberapa detik [DEBUG: ${detail}]` };
     }
 
     // Ambil token dari response
