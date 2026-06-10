@@ -36,14 +36,15 @@
  */
 "use client";
 
-import { useState } from "react";
-// useState = simpan nilai username dan password yang diketik user
+import { useState, useEffect } from "react";
+// useState  = simpan nilai username dan password yang diketik user
+// useEffect = cek status login saat halaman dibuka (untuk proteksi di bawah)
 
 import { useRouter } from "next/navigation";
 // useRouter = untuk redirect ke halaman utama setelah login berhasil
 
 import { useAuth } from "../contexts/AuthContext";
-// useAuth() = akses login(), isLoading, error dari AuthContext
+// useAuth() = akses login(), isLoading, error, dan user dari AuthContext
 
 /**
  * DEMO_ACCOUNTS — Daftar akun yang bisa dipakai untuk login
@@ -64,16 +65,53 @@ const DEMO_ACCOUNTS = [
  */
 export default function LoginPage() {
   const router = useRouter();
-  const { login, isLoading, error } = useAuth();
+  const { login, isLoading, error, user } = useAuth();
   // login()    = fungsi login dari AuthContext
-  // isLoading  = true saat proses login berlangsung (tampilkan spinner)
+  // isLoading  = true saat AuthContext masih cek cookie sesi ATAU
+  //              saat proses login sedang berlangsung
   // error      = string pesan error jika login gagal (null jika tidak ada)
+  // user       = data user yang sedang login (null jika belum login)
 
   // State lokal untuk nilai form
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   // Nilai ini dikontrol oleh React (controlled inputs)
   // Setiap ketukan → setUsername/setPassword → re-render input
+
+  /**
+   * PROTEKSI: jika user SUDAH login tapi tetap membuka /login
+   * (misalnya ketik manual URL /login di address bar), langsung
+   * arahkan ke halaman produk ("/") — tidak perlu menampilkan
+   * form login lagi.
+   *
+   * Dependency [isLoading, user, router]:
+   * - Tunggu sampai isLoading === false (AuthContext sudah selesai
+   *   cek cookie sesi), baru cek apakah `user` ada.
+   * - router.replace (bukan push) → "/login" tidak masuk ke riwayat
+   *   browser, supaya tombol "Back" tidak membawa user balik ke sini.
+   */
+  useEffect(() => {
+    if (!isLoading && user) {
+      router.replace("/");
+    }
+  }, [isLoading, user, router]);
+
+  // ── REDIRECT GUARD ──
+  // Jika user TERNYATA sudah login (sedang menunggu redirect dari
+  // useEffect di atas) → tampilkan spinner, JANGAN tampilkan form
+  // login (mencegah "kedipan" form sebelum redirect ke "/").
+  //
+  // Catatan: tidak memeriksa `isLoading` di sini, karena `isLoading`
+  // juga bernilai true saat proses SUBMIT login sedang berjalan —
+  // pada kondisi itu form harus tetap tampil (tombol "Masuk" yang
+  // menampilkan spinner "Memproses...", lihat di bawah).
+  if (user) {
+    return (
+      <div className="min-h-screen bg-[#f8f8f6] flex items-center justify-center">
+        <div className="w-6 h-6 border-2 border-gray-300 border-t-gray-900 rounded-full animate-spin" />
+      </div>
+    );
+  }
 
   /**
    * handleSubmit — Dipanggil saat form di-submit (klik "Masuk" atau tekan Enter)
