@@ -89,8 +89,18 @@ export default function LoginPage() {
     const success = await login(username, password);
     // login() return true jika berhasil, false jika gagal
 
-    // Jika berhasil → redirect ke halaman utama
-    if (success) router.push("/");
+    // Jika berhasil → redirect ke halaman produk (utama)
+    if (success) {
+      // router.refresh() → minta Next.js refetch data Server Component
+      // di halaman tujuan, supaya cookie "user_session" yang baru saja
+      // di-set langsung "terlihat" oleh server (mis. Navbar versi server).
+      router.refresh();
+
+      // router.replace (bukan push) → halaman /login tidak masuk ke
+      // riwayat browser, jadi tombol "Kembali" tidak akan membawa user
+      // balik ke form login setelah berhasil masuk.
+      router.replace("/");
+    }
     // Jika gagal → login() sudah set error di AuthContext
     // → error akan ditampilkan di form (lihat di bawah: {error && ...})
   };
